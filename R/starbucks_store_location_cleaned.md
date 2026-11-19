@@ -33,7 +33,7 @@ because “NA” is also the country code for Namibia. `read_csv` removes
 spaces at the start and end of each value.
 
 ``` r
-raw <- read_csv("\data\raw\directory.csv",
+raw <- read_csv("../data/raw/directory.csv",
                 col_types = cols(.default = col_character()),
                 na = character())
 
@@ -254,7 +254,7 @@ ggplot(clean, aes(longitude, latitude)) +
 # 8. Save the clean file for Tableau
 
 ``` r
-dir.create("reports", showWarnings = FALSE)
+dir.create("../data/processed", showWarnings = FALSE)
 write_csv(clean, "starbucks_clean.csv")
 ```
 
