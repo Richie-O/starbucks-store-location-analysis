@@ -33,7 +33,7 @@ because “NA” is also the country code for Namibia. `read_csv` removes
 spaces at the start and end of each value.
 
 ``` r
-raw <- read_csv("C:/Users/mishop/Desktop/Project/preflight/data/directory.csv",
+raw <- read_csv("\data\raw\directory.csv",
                 col_types = cols(.default = col_character()),
                 na = character())
 
