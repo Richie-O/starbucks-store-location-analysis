@@ -1,0 +1,186 @@
+---
+title: "Starbucks store locations: EDA and cleaning"
+author: "Odia"
+date: "2026-11-18"
+output:
+  github_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+# First time only, run this once in the R console:
+# install.packages(c("tidyverse", "rmarkdown"))
+library(tidyverse)
+
+min_group <- 10   # a group smaller than this is called "Other" (a Proposed threshold)
+```
+
+# 1. What this report does
+
+This is a public list of Starbucks stores, downloaded from Kaggle. It is a learning project.
+The snapshot date and how the data was collected are unknown.
+
+The report does four things: loads the file, cleans it, and saves a clean file for Tableau.
+
+# 2. Load the data
+
+We read every column as text, so nothing is changed by accident. `na = character()` stops R
+from treating the text "NA" as missing, because "NA" is also the country code for Namibia.
+`read_csv` removes spaces at the start and end of each value.
+
+```{r load}
+raw <- read_csv("/data/raw/directory.csv",
+                col_types = cols(.default = col_character()),
+                na = character())
+
+# The original column names have spaces and a slash, so give them simple names
+raw <- raw %>%
+  rename(brand = Brand, store_number = `Store Number`, store_name = `Store Name`,
+         ownership_type = `Ownership Type`, street_address = `Street Address`,
+         city = City, state_province = `State/Province`, country = Country,
+         postcode = Postcode, phone_number = `Phone Number`, timezone = Timezone,
+         longitude = Longitude, latitude = Latitude)
+
+dim(raw)    # expect 25600 rows and 13 columns
+head(raw)
+```
+
+
+# 3. Clean the data
+
+Each step below is small. Nothing is deleted except the one repeated Store Number.
+
+```{r clean}
+# Step 1: blank values become NA (R's way of saying "missing")
+clean <- raw %>%
+  mutate(across(everything(), ~ na_if(.x, "")))
+
+# Step 2: the text "NA" in postcode and city also means missing
+clean <- clean %>%
+  mutate(postcode = na_if(postcode, "NA"),
+         city = na_if(city, "NA"))
+
+# Keep a copy of the cleaned data before removing the repeated Store Number
+before_dedup <- clean
+
+# Step 3: coordinates become numbers
+clean <- clean %>%
+  mutate(longitude = as.numeric(longitude),
+         latitude = as.numeric(latitude))
+
+# Step 4: Check to confirm Grain using Store Number, to confirm one row = one store number.
+# Keep one row per Store Number if likely. We put rows WITH coordinates first,
+# so the row with coordinates is the one that stays.
+clean <- clean %>%
+  mutate(row_id = row_number(), .before = 1) %>%
+  arrange(store_number, is.na(longitude)) %>%
+  distinct(store_number, .keep_all = TRUE) %>%
+  arrange(row_id)
+
+nrow(raw) - nrow(clean)   # expect 1 row removed
+```
+
+# 4. Add a few simple columns
+
+```{r features}
+clean <- clean %>%
+  mutate(
+    # Extract the continent safely even if there is no space prefix
+    tz_clean = if_else(str_detect(timezone, " "), str_split_i(timezone, " ", 2), timezone),
+    continent = str_split_i(tz_clean, "/", 1)
+  ) %>%
+  select(-tz_clean)
+
+clean
+```
+
+# 5. Explore the data
+
+## Brand and ownership
+
+```{r eda-brand}
+clean %>% 
+  count(brand, sort = TRUE) %>%
+  mutate(
+    share_pct = round(100 * n / sum(n), 2)
+  )
+
+clean %>% 
+  count(
+    ownership_type, sort = TRUE
+  ) %>% 
+  mutate(
+    share_pct = round(100 * n / sum(n), 2)
+  )
+```
+
+## continent
+
+```{r continent}
+clean %>% 
+  count(
+    continent, sort = TRUE
+  ) %>% 
+  mutate(
+    share_pct = round(100 * n / sum(n), 2)
+  )
+```
+
+
+## Countries
+
+```{r}
+# The 10 countries with the most stores
+clean %>% 
+  count(
+    country, sort = TRUE
+  ) %>% 
+  mutate(
+    share_pct = round(100 * n / sum(n), 2)
+  ) %>%
+  head(10)
+```
+
+
+# 6. Two quick checks (plots)
+
+These are only to check the data. Make the final charts in Tableau.
+
+```{r plot-country, fig.height=4}
+clean %>%
+  count(country, sort = TRUE) %>%
+  head(10) %>%
+  ggplot(aes(x = reorder(country, n), y = n)) +
+  geom_col() +
+  coord_flip() +
+  labs(title = "Stores by country (top 10)", x = NULL, y = "Rows")
+```
+
+```{r plot-map, fig.height=4}
+# If the data is right, this looks like a map of the world
+ggplot(clean, aes(longitude, latitude)) +
+  geom_point(alpha = 0.15, size = 0.4) +
+  coord_fixed() +
+  labs(title = "Coordinate check")
+```
+
+# 8. Save the clean file for Tableau
+
+```{r export}
+dir.create("/data/processed", showWarnings = FALSE)
+write_csv(clean, "starbucks_clean.csv")
+```
+
+In Tableau, connect to `processed/starbucks_clean.csv` as a text file. Set `longitude` and
+`latitude` to the Longitude and Latitude geographic roles. Keep `store_number`, `postcode`
+and `phone_number` as text.
+
+# Limits
+
+- **Unknown:** the snapshot date, how the data was collected, and whether it covers every store.
+- **Unknown:** what the Ownership Type and Brand labels mean in practice, and why a postcode
+  or phone number is blank.
+- The row removed in Step 4 is a repeated Store Number. That it is one store listed twice is my
+  reading of your own check, not something the data proves.
+- Coordinates were not checked against country borders.
